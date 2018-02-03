@@ -1,0 +1,6 @@
+// CRuby module-map for macOS system default Ruby
+module CRuby [system] {
+  header "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Ruby.framework/Headers/ruby.h"
+  link "ruby"
+  export *
+}
