@@ -1,0 +1,559 @@
+#! /usr/bin/env perl -w
+use strict;
+
+# 5) Linux test
+# 6) rvm version
+# rvm list strings
+# rvm info|grep " path"
+# 7) stop -> usage
+# 8) figure out interactive
+# 9) update notes
+# A) Write a readme
+# B) Add a license
+
+#
+# Problems
+# --------
+# Paths with spaces will almost certainly break.
+#
+
+# cfg_cruby
+#
+# script to generate following files:
+#
+# Package.swift
+#   include, or don't include, some pkgconfig reference
+#
+# module.modulemap
+#   include the full header path
+#   include the library soname
+#
+# And optionally:
+# CRuby.pc
+#   compile + link flags
+#
+# Options:
+# 1) [darwin && xcode-select exists]
+#    Use system ruby (from framework) and current Xcode headers
+#    => No pkgconfig in Package.swift
+#    => module.modulemap uses Xcode header + 'ruby'
+#    => No pc
+#
+# 2) [pkg-config exists]
+#    Use a version of Ruby that pkg-config knows about [list]
+#    => Package.swift refs our custom CRuby.pc
+#       [cannot use actual pkg-config becoz SPM will barf on ldflags]
+#    => module.modulemap uses info from the working pkg-config
+#
+# 3) [rbenv exists]
+#    Use a Ruby managed by `rbenv` [list]
+#    => Package.swift refs our custom CRuby.pc
+#    => module.modulemap uses figured-out things
+#    => If .so/.dylib exists then use it else the static
+#    => Figure out cflags manually [pkg-config may not exist]
+#    => Get DLDFLAGS from the pkgconfig
+#    => If static then manually make it up
+#
+# 4) [rvm exists]
+#    Use a Ruby managed by `rvm` [list] - rvm debug|grep rvm_path
+#    Basically the same - the LIBRUBYARG_SHARED/STATIC is hilariously wrong.
+#
+# 5) [always]
+#    Can't find Xcode, pkg-config, rbenv, or rvm.
+#    Point me to a ruby installation?  A directory with 'ruby' in the name
+#    that contains directories bin, include, lib, share
+#    [proceed from 3]
+#
+
+=head1 NAME
+
+cfg_cruby - Configure the CRuby libruby wrapper for the Swift Package Manager
+
+=head1 SYNOPSIS
+
+cfg_cruby [--mode=<mode> [options]]
+
+ Options:
+   --name       The name of a managed version of Ruby to use
+   --path       The full path to the install dir of the custom Ruby
+
+ Modes:
+   interactive  (default) Guided configuration.
+   xcode        Use the macOS system Ruby with Xcode dev parts.
+   pkgconfig    Use a Ruby known to pkg-config(1).
+                Requires --name, the package to use, eg. 'ruby-2.5'.
+   rbenv        Use a Ruby known to rbenv.
+                Requires --name, the Ruby version to use, eg. '2.2.2'.
+   rvm          Use a Ruby known to rvm.
+                Requires --name, the Ruby to use, eg. 'ruby-2.4.1'.
+   custom       Use an arbitrary Ruby installation.
+                Requires --path.
+
+Output files are produced in the same directory as the cfg_cruby script.
+
+=cut
+
+use Getopt::Long;
+use Pod::Usage;
+use Cwd qw(abs_path);
+use File::Basename;
+
+#
+# OS utils, setup
+#
+
+my (undef, $script_dir, undef) = fileparse(__FILE__);
+my $output_dir = abs_path($script_dir);
+
+sub is_macos {
+    use POSIX qw(uname);
+    my ($system_arch, undef) = uname();
+    return $system_arch eq "Darwin";
+}
+
+sub stop_usage {
+    my $msg = shift;
+    pod2usage(-message => $msg, -exitval => 2);
+}
+
+sub stop {
+    my $msg = shift;
+    print("$msg\n");
+    exit(3);
+}
+
+# Return command results, intercept fail status
+sub run_and_check {
+    my ($command, $verbose) = @_;
+    my $result = `$command`;
+    unless (defined $result) {
+        print("Can't run '$command'.\n") if $verbose;
+    } elsif ($? != 0) {
+        print("Running '$command' failed: " . ($?>>8) . "\n") if $verbose;
+        return undef;
+    }
+    chomp $result;
+    return $result;
+}
+
+# Same but handling multi-line output
+sub run_and_check_list {
+    my $lines = run_and_check(@_) or return 0;
+
+    my @result;
+    foreach my $line (split /^/, $lines) {
+        chomp($line);
+        push @result, $line;
+    }
+    return @result;
+}
+
+#
+# CLI validation + main
+#
+
+my $mode = 'interactive';
+my $ruby_name;
+my $ruby_path;
+
+sub confirm_noflags {
+    stop_usage("--name and --path do not apply to $mode mode.")
+        if $ruby_name or $ruby_path;
+}
+
+sub confirm_name {
+    stop_usage("Only --name must be set for $mode mode.")
+        if !$ruby_name or $ruby_path;
+}
+
+sub confirm_path {
+    stop_usage("Only --path must be set for $mode mode.")
+        if $ruby_name or !$ruby_path;
+}
+
+GetOptions('mode=s' => \$mode,
+           'name=s' => \$ruby_name,
+           'path=s' => \$ruby_path) or stop_usage();
+
+if ($mode eq 'interactive') {
+    confirm_noflags();
+} elsif ($mode eq 'xcode') {
+    confirm_noflags();
+    validate_xcode(1) && do_xcode()
+        or stop("Could not configure for Xcode.");
+} elsif ($mode eq 'pkgconfig' || $mode eq 'pkg-config') {
+    confirm_name();
+    validate_pkgconfig(1) && validate_pkgconfig_args() && do_pkgconfig()
+        or stop("Could not configure for pkg-config.");
+} elsif ($mode eq 'rbenv') {
+    confirm_name();
+    validate_rbenv(1) && validate_rbenv_args() && do_rbenv()
+        or stop("Could not configure for rbenv.");
+} elsif ($mode eq 'rvm') {
+    confirm_name();
+    validate_rvm(1) or stop("Could not configure for rvm.");
+} elsif ($mode eq 'custom') {
+    confirm_path();
+    validate_custom(1) && validate_custom_args() && do_custom()
+        or stop("Could not configure for custom path.");
+} else {
+    stop_usage("Bad mode.")
+}
+
+exit(0);
+
+#
+# File writing
+#
+sub write_file {
+    my ($filename, $content) = @_;
+
+    my $pathname = "$output_dir/$filename";
+
+    open FILE, ">$pathname"
+        or stop("Couldn't open $pathname for writing: $!");
+
+    print FILE $content;
+
+    print "Wrote $filename\n";
+}
+
+sub write_modulemap {
+    my ($header, $libname) = @_;
+
+    my $content = <<"EOF";
+// CRuby module-map generated by cfg_cruby
+module CRuby [system] {
+  header \"$header\"
+  link \"$libname\"
+  export *
+}
+EOF
+    write_file("module.modulemap", $content);
+}
+
+sub write_package {
+    my $pkgconfig = shift;
+    my $pkgconfig_line = "";
+
+    if ($pkgconfig) {
+        # ahem
+        $pkgconfig_line = ",\n    pkgConfig: \"$pkgconfig\"";
+    }
+
+    my $content = <<"EOF";
+// swift-tools-version:4.0
+// Generated by cfg-cruby
+
+import PackageDescription
+
+let package = Package(
+    name: "CRuby"$pkgconfig_line
+)
+EOF
+
+    write_file("Package.swift", $content);
+}
+
+# Shonky arg filterer, duplicating SPM 'whitelist' 'functionality' to
+# get an 'acceptable' list of flags.
+sub spm_filter_flags {
+    my @flags = split ' ', shift;
+
+    my @filtered = ();
+    while (my $next = shift @flags) {
+        if ($next =~ m/^-([IFLl]|framework)/) {
+            push @filtered, $next;
+            while ($flags[0] && $flags[0] !~ m/^-/) {
+                push @filtered, (shift @flags);
+            }
+        }
+    }
+
+    return join ' ', @filtered;
+}
+
+sub write_pkgconfig {
+    my ($cflags, $ldflags) = @_;
+    my $filtered_cflags = spm_filter_flags($cflags);
+    my $filtered_ldflags = spm_filter_flags($ldflags);
+
+    my $content = <<"EOF";
+# Generated by cfg_cruby
+Cflags: $filtered_cflags
+Libs: $filtered_ldflags
+EOF
+
+    write_file("CRuby.pc", $content);
+    print(
+"SwiftPM must be able to find the directory containing 'CRuby.pc' when
+it builds an executable depending on CRuby. For example:
+'PKG_CONFIG_PATH=\$(pwd)/Packages/CRuby:\$PKG_CONFIG_PATH swift build'.\n");
+}
+
+sub clear_pkgconfig {
+    my $pathname = "$output_dir/CRuby.pc";
+    if (-r $pathname) {
+        unlink($pathname) or stop("Can't delete $pathname: $!");
+        print("Deleted CRuby.pc\n");
+    }
+}
+
+# Phases
+#  Validate - Does it make sense to use the mode.
+#             Do not check if args are consistent.
+#           - Used as first step of mode validate with verbose flag.
+#           - Used to populate interactive menu without verbose flag.
+#  ValidateArgs - Are entered args consistent with mode.
+#               - Used as second step of mode validate.
+#               - Used to validate interactive user input.
+#  Do - Create files for mode.
+#
+#  Return 0 on failure, 1 on success.
+
+#
+# Xcode
+#
+my $xcode_dev_dir;
+my $xcode_ruby_lib;
+my $xcode_ruby_header;
+
+sub validate_xcode {
+    my $verbose = shift;
+
+    unless (is_macos()) {
+        print("Not macOS.\n") if $verbose;
+        return 0;
+    }
+
+    $xcode_dev_dir = run_and_check("xcode-select -p", $verbose)
+        or return 0;
+
+    $xcode_ruby_header = $xcode_dev_dir .
+        "/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/".
+        "System/Library/Frameworks/Ruby.framework/Headers/ruby.h";
+
+    unless (-r $xcode_ruby_header) {
+        print("Don't understand Xcode SDK layout.\n") if $verbose;
+        return 0;
+    }
+
+    $xcode_ruby_lib = readlink("/usr/lib/libruby.dylib");
+    unless ($xcode_ruby_lib) {
+        print("Don't understand system Ruby setup, $?\n") if $verbose;
+        return 0;
+    }
+
+    1;
+}
+
+sub do_xcode {
+    print("Configuring for Xcode in $output_dir:\n");
+    print("  Xcode: $xcode_dev_dir\n");
+    print("  Ruby: /usr/lib/$xcode_ruby_lib\n");
+
+    write_modulemap($xcode_ruby_header, "ruby");
+    write_package(); # no pkgconfig ref
+    clear_pkgconfig();
+
+    1;
+}
+
+#
+# Generic list-of-ruby-options helpers
+#
+my @ruby_versions;
+
+sub validate_candidate_list {
+    my ($cmd, $verbose) = @_;
+    if (scalar @ruby_versions == 0) {
+        print("No Ruby found in '$cmd'.\n") if $verbose;
+        return 0;
+    }
+    1;
+}
+
+sub validate_ruby_in_list {
+    unless (grep( /^$ruby_name$/, @ruby_versions)) {
+        print("Ruby '$ruby_name' not a candidate, choices:\n");
+        foreach my $ver (@ruby_versions) {
+            print("  $ver\n");
+        }
+        return 0;
+    }
+    1;
+}
+
+#
+# pkg-config
+#
+
+sub validate_pkgconfig {
+    my $verbose = shift;
+    my $cmd = "pkg-config --list-all";
+
+    my @pkg_lines = run_and_check_list($cmd, $verbose)
+        or return 0;
+    @ruby_versions = map { (split ' ')[0] } grep(/^ruby-/, @pkg_lines);
+
+    return validate_candidate_list($cmd, $verbose);
+}
+
+sub validate_pkgconfig_args {
+    validate_ruby_in_list();
+}
+
+sub do_pkgconfig {
+    print("Configuring for pkg-config in $output_dir:\n");
+    print("  Ruby: $ruby_name\n");
+
+    my $ruby_soname =
+        run_and_check("pkg-config --variable RUBY_SO_NAME $ruby_name", 1);
+
+    my $ruby_hdr_dir =
+        run_and_check("pkg-config --variable rubyhdrdir $ruby_name", 1);
+
+    my $cflags =
+        run_and_check("pkg-config --cflags $ruby_name", 1);
+
+    my $ldflags =
+        run_and_check("pkg-config --libs $ruby_name", 1);
+
+    unless ($ruby_soname && $ruby_hdr_dir && $cflags && $ldflags) {
+        print("Can't understand .pc format.");
+        return 0;
+    }
+
+    # Good old Homebrew seems to not get this quite right :(
+    if (is_macos()) {
+        if (my $brew_prefix = run_and_check("brew --prefix", 0)) {
+            $ldflags .= " -L$brew_prefix/lib";
+        }
+    }
+
+    write_modulemap("$ruby_hdr_dir/ruby.h", $ruby_soname);
+    write_package("CRuby");
+    write_pkgconfig($cflags, $ldflags);
+
+    1;
+}
+
+#
+# Rbenv etc.
+#
+my $rbenv_root;
+
+sub validate_rbenv {
+    my $verbose = shift;
+    my $cmd = "rbenv versions --bare";
+
+    $rbenv_root = run_and_check("rbenv root", $verbose)
+        or return 0;
+
+    @ruby_versions = run_and_check_list($cmd, $verbose)
+        or return 0;
+
+    return validate_candidate_list(@ruby_versions);
+}
+
+sub validate_rbenv_args { validate_ruby_in_list() }
+
+sub do_rbenv { do_managed("$rbenv_root/versions/$ruby_name", "rbenv"); }
+
+sub do_managed { $ruby_path = shift; do_custom2(shift); }
+
+#
+# Custom
+#
+sub validate_custom {
+    1;
+}
+
+sub validate_custom_args {
+    unless (-d $ruby_path) {
+        print("Custom path is not a directory.\n");
+        return 0;
+    }
+
+    unless (-d "$ruby_path/lib" && -d "$ruby_path/include") {
+        print("Custom path does not look like Ruby.\n");
+        return 0;
+    }
+
+    # just for consistency
+    $ruby_path =~ s/\/$//;
+
+    1;
+}
+
+sub do_custom { do_custom2("custom"); }
+
+# Assemble the bits to use an arbitrary Ruby installation.
+# Sadly there may be no pkg-config installed on the system.
+sub do_custom2 {
+    my $manager = shift;
+    print("Configuring for $manager in $output_dir:\n");
+    print("  Ruby: $ruby_path\n");
+
+    # Top include dir - maybe different name (fix ver)
+    my $ruby_hdr_dir = (glob "$ruby_path/include/ruby*")[0];
+
+    # Find the arch dir - experience shows rbenv in particular will
+    # leave old ones lying around post reinstall, so check the pkgconfig file
+    # for the correct one.
+    my $pc = glob "$ruby_path/lib/pkgconfig/ruby*pc";
+    my $arch = run_and_check("grep ^arch= $pc|sed -e s/^.*=//", 1);
+    unless ($arch) {
+        print("Error: Can't find 'arch' in the .pc file.\n");
+        return 0;
+    }
+
+    # Only cflags are the includes search paths
+    my $cflags = "-I$ruby_hdr_dir/$arch -I$ruby_hdr_dir";
+
+    # Find the lib.  Older Rubies don't have SOEXT in their .pc.
+    my $libdir = "$ruby_path/lib";
+    my @libpaths = glob "$libdir/*";
+
+    my $ruby_soname;
+    my $ldflags = "";
+
+    foreach my $path (@libpaths) {
+        my $file = basename($path);
+        if ($file =~ m/^lib(ruby\..*)\.(so|dylib)$/) {
+            $ruby_soname = $1;
+            last;
+        }
+    }
+
+    # If no shared lib then try for a static one...
+    unless ($ruby_soname) {
+        foreach my $path (@libpaths) {
+            my $file = basename($path);
+            # (older rbenv use libruby-static with no version part)
+            if ($file =~ m/^lib(ruby.*static)\.a$/) {
+                $ruby_soname = $1;
+                if (is_macos()) {
+                    $ldflags = "-framework CoreFoundation";
+                }
+                print("Note: Can't find a shared library.  Using static.\n");
+                print("Note: You may see warnings from 'ld' when linking.\n");
+                print("Note: If so, do not be alarmed: everything is fine.\n");
+                last;
+            }
+        }
+    }
+    
+    # Flags from the pc file
+    my $pkglibs = run_and_check("grep ^LIBS= $pc|sed -e s/^.*=//", 1);
+    unless ($pkglibs) {
+        print("Error: Can't find 'LIBS' in the .pc file.\n");
+        return 0;
+    }
+
+    write_modulemap("$ruby_hdr_dir/ruby.h", $ruby_soname);
+    write_package("CRuby");
+    write_pkgconfig($cflags, "-L$libdir $pkglibs $ldflags");
+
+    1;
+}
