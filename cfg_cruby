@@ -1,12 +1,9 @@
 #! /usr/bin/env perl -w
 use strict;
 
-# 5) Linux test
+# 5) Linux test incl rvm
 # 6) rvm version
-# rvm list strings
-# rvm info|grep " path"
 # 7) stop -> usage
-# 8) figure out interactive
 # 9) update notes
 # A) Write a readme
 # B) Add a license
@@ -71,14 +68,13 @@ cfg_cruby - Configure the CRuby libruby wrapper for the Swift Package Manager
 
 =head1 SYNOPSIS
 
-cfg_cruby [--mode=<mode> [options]]
+cfg_cruby --mode=<mode> [options]
 
  Options:
    --name       The name of a managed version of Ruby to use
    --path       The full path to the install dir of the custom Ruby
 
  Modes:
-   interactive  (default) Guided configuration.
    xcode        Use the macOS system Ruby with Xcode dev parts.
    pkgconfig    Use a Ruby known to pkg-config(1).
                 Requires --name, the package to use, eg. 'ruby-2.5'.
@@ -124,12 +120,12 @@ sub stop {
 
 # Return command results, intercept fail status
 sub run_and_check {
-    my ($command, $verbose) = @_;
+    my $command = shift;
     my $result = `$command`;
     unless (defined $result) {
-        print("Can't run '$command'.\n") if $verbose;
+        print("Can't run '$command'.\n");
     } elsif ($? != 0) {
-        print("Running '$command' failed: " . ($?>>8) . "\n") if $verbose;
+        print("Running '$command' failed: " . ($?>>8) . "\n");
         return undef;
     }
     chomp $result;
@@ -152,7 +148,7 @@ sub run_and_check_list {
 # CLI validation + main
 #
 
-my $mode = 'interactive';
+my $mode;
 my $ruby_name;
 my $ruby_path;
 
@@ -175,8 +171,8 @@ GetOptions('mode=s' => \$mode,
            'name=s' => \$ruby_name,
            'path=s' => \$ruby_path) or stop_usage();
 
-if ($mode eq 'interactive') {
-    confirm_noflags();
+unless ($mode) {
+    stop_usage("--mode not set.");
 } elsif ($mode eq 'xcode') {
     confirm_noflags();
     validate_xcode(1) && do_xcode()
@@ -191,7 +187,8 @@ if ($mode eq 'interactive') {
         or stop("Could not configure for rbenv.");
 } elsif ($mode eq 'rvm') {
     confirm_name();
-    validate_rvm(1) or stop("Could not configure for rvm.");
+    validate_rvm(1) && validate_rvm_args() && do_rvm()
+        or stop("Could not configure for rvm.");
 } elsif ($mode eq 'custom') {
     confirm_path();
     validate_custom(1) && validate_custom_args() && do_custom()
@@ -302,11 +299,9 @@ sub clear_pkgconfig {
 # Phases
 #  Validate - Does it make sense to use the mode.
 #             Do not check if args are consistent.
-#           - Used as first step of mode validate with verbose flag.
-#           - Used to populate interactive menu without verbose flag.
+#           - Used as first step of mode validate
 #  ValidateArgs - Are entered args consistent with mode.
 #               - Used as second step of mode validate.
-#               - Used to validate interactive user input.
 #  Do - Create files for mode.
 #
 #  Return 0 on failure, 1 on success.
@@ -319,14 +314,12 @@ my $xcode_ruby_lib;
 my $xcode_ruby_header;
 
 sub validate_xcode {
-    my $verbose = shift;
-
     unless (is_macos()) {
-        print("Not macOS.\n") if $verbose;
+        print("Not macOS.\n");
         return 0;
     }
 
-    $xcode_dev_dir = run_and_check("xcode-select -p", $verbose)
+    $xcode_dev_dir = run_and_check("xcode-select -p")
         or return 0;
 
     $xcode_ruby_header = $xcode_dev_dir .
@@ -334,13 +327,13 @@ sub validate_xcode {
         "System/Library/Frameworks/Ruby.framework/Headers/ruby.h";
 
     unless (-r $xcode_ruby_header) {
-        print("Don't understand Xcode SDK layout.\n") if $verbose;
+        print("Don't understand Xcode SDK layout.\n");
         return 0;
     }
 
     $xcode_ruby_lib = readlink("/usr/lib/libruby.dylib");
     unless ($xcode_ruby_lib) {
-        print("Don't understand system Ruby setup, $?\n") if $verbose;
+        print("Don't understand system Ruby setup, $?\n");
         return 0;
     }
 
@@ -365,9 +358,9 @@ sub do_xcode {
 my @ruby_versions;
 
 sub validate_candidate_list {
-    my ($cmd, $verbose) = @_;
+    my $cmd = shift;
     if (scalar @ruby_versions == 0) {
-        print("No Ruby found in '$cmd'.\n") if $verbose;
+        print("No Ruby found in '$cmd'.\n");
         return 0;
     }
     1;
@@ -389,14 +382,13 @@ sub validate_ruby_in_list {
 #
 
 sub validate_pkgconfig {
-    my $verbose = shift;
     my $cmd = "pkg-config --list-all";
 
-    my @pkg_lines = run_and_check_list($cmd, $verbose)
+    my @pkg_lines = run_and_check_list($cmd)
         or return 0;
     @ruby_versions = map { (split ' ')[0] } grep(/^ruby-/, @pkg_lines);
 
-    return validate_candidate_list($cmd, $verbose);
+    return validate_candidate_list($cmd);
 }
 
 sub validate_pkgconfig_args {
@@ -444,13 +436,12 @@ sub do_pkgconfig {
 my $rbenv_root;
 
 sub validate_rbenv {
-    my $verbose = shift;
     my $cmd = "rbenv versions --bare";
 
-    $rbenv_root = run_and_check("rbenv root", $verbose)
+    $rbenv_root = run_and_check("rbenv root")
         or return 0;
 
-    @ruby_versions = run_and_check_list($cmd, $verbose)
+    @ruby_versions = run_and_check_list($cmd)
         or return 0;
 
     return validate_candidate_list(@ruby_versions);
@@ -461,6 +452,26 @@ sub validate_rbenv_args { validate_ruby_in_list() }
 sub do_rbenv { do_managed("$rbenv_root/versions/$ruby_name", "rbenv"); }
 
 sub do_managed { $ruby_path = shift; do_custom2(shift); }
+
+my $rvm_home;
+
+sub validate_rvm {
+    my $cmd = "rvm list strings";
+
+    my $rvm_info = run_and_check("rvm info | grep ' path'")
+        or return 0;
+    $rvm_info =~ m/\"(.*)\"/;
+    $rvm_home = $1;
+
+    @ruby_versions = run_and_check_list($cmd)
+        or return 0;
+
+    return validate_candidate_list(@ruby_versions);
+}
+
+sub validate_rvm_args { validate_ruby_in_list() }
+
+sub do_rvm { do_managed("$rvm_home/rubies/$ruby_name", "rvm"); }
 
 #
 # Custom
