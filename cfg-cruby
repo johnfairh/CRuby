@@ -4,17 +4,10 @@ use strict;
 
 use constant VERSION => "1.0.0";
 
-# 9) update notes
-# A) Write a readme
-# B) Add a license
-
-#
-# Problems
-# --------
-# Paths with spaces will almost certainly break at some point on some paths.
-#
-
 # cfg-cruby
+#
+# CRuby configuration script.
+# Distributed under the MIT license.
 #
 # script to generate following files:
 #
@@ -27,7 +20,11 @@ use constant VERSION => "1.0.0";
 #   include the library soname
 #
 # CRuby.pc
-#   compile + link flags
+#   compile + link flags/dirs
+
+# Problems
+# --------
+# Paths with spaces will almost certainly break at some point on some paths.
 
 =head1 NAME
 
@@ -211,7 +208,6 @@ sub write_package {
     my $pkgconfig_line = "";
 
     if ($pkgconfig) {
-        # ahem
         $pkgconfig_line = ",\n    pkgConfig: \"$pkgconfig\"";
     }
 
