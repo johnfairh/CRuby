@@ -16,9 +16,13 @@ Include this repo as a dependency in your project:
 .package(url: "https://github.com/johnfairh/CRuby/", majorVersion: 1)
 ```
 
-`CRuby` comes set up to use the macOS system Ruby and the Xcode installed in
+`CRuby` comes set up to use the macOS system Ruby and the Xcode found at
 `/Applications/Xcode.app`.  If you want to use a different Ruby then you have
-to use the `cfg-cruby` script to rewrite the package files, for example:
+to use the `cfg-cruby` script to rewrite the build files.  If not using Xcode
+then `cfg-cruby` generates a custom pkg-config file to simplify passing flags
+to `swift build`.
+
+For example to configure to use Ruby 2.4.1 managed by `rbenv`:
 ```shell
 swift package edit CRuby
 ./Packages/CRuby/cfg-cruby --mode rbenv --name 2.4.1
