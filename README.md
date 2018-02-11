@@ -1,6 +1,7 @@
 # CRuby
 
-Wrap `libruby` for SwiftPM 4.  Easily reconfigure for your Ruby installation.
+Wrap `libruby` for SwiftPM or Xcode.  Easily reconfigure for your Ruby
+installation.
 
 Tested with:
 * macOS 10.13 system Ruby
@@ -11,18 +12,25 @@ Tested with:
 
 ## Usage
 
+`CRuby` comes set up to use the macOS system Ruby and the Xcode found at
+`/Applications/Xcode.app` to provide C headers.
+
+If you want to use a different Ruby, or if your Xcode is in a different spot,
+then you have to use the `cfg-cruby` script to rewrite the build files.
+
+For options other than macOS system Ruby, `cfg-cruby` generates a custom
+pkg-config file called `CRuby.pc` that can be passed directly to `swift build`
+or manually copied into your Xcode project settings.
+
+### Swift Package Manager
+
 Include this repo as a dependency in your project:
 ```swift
 .package(url: "https://github.com/johnfairh/CRuby/", majorVersion: 1)
 ```
 
-`CRuby` comes set up to use the macOS system Ruby and the Xcode found at
-`/Applications/Xcode.app`.  If you want to use a different Ruby then you have
-to use the `cfg-cruby` script to rewrite the build files.  If not using Xcode
-then `cfg-cruby` generates a custom pkg-config file to simplify passing flags
-to `swift build`.
-
-For example to configure to use Ruby 2.4.1 managed by `rbenv`:
+To use a Ruby other than macOS system default you need to reconfigure.  For
+example to set up Ruby 2.4.1 managed by `rbenv`:
 ```shell
 swift package edit CRuby
 ./Packages/CRuby/cfg-cruby --mode rbenv --name 2.4.1
@@ -30,11 +38,28 @@ export PKG_CONFIG_PATH=$(pwd)/Packages/CRuby/CRuby.pc:$PKG_CONFIG_PATH
 swift build
 ```
 Either leave the `CRuby` package in edit mode or fork the repo, use that fork
-as your source, and push your customizations back there.
-
-## Configs
+as your remote, and push your customizations back there.
 
 ### Xcode
+
+Include this repo in your project.  A git submodule works well.  So either way
+you have a directory called `CRuby`.  Then go to *Build Settings* for the Target
+where you want to do `import CRuby` and find *Import Paths* under *Swift
+Compiler - Search Paths*.  Add the path to your `CRuby` directory - you can
+use `${SRCROOT}` to substitute for the directory containing the project file.
+
+Check Xcode is happy with an `import CRuby` line.
+
+If you want to use a different Ruby, run `cfg-cruby`.  Now transfer the settings
+from the `CRuby.pc` to the Xcode build settings for the target:
+1. Find *Header Search Paths* under *Search Paths* and add the directories mentioned in the `Cflags:` line of `CRuby.pc`.  Don't copy over the `-I` part, just the paths.
+2. Find *Library Search Paths* under *Search Paths* and add the directories mentioned in the `Libs:` line of `CRuby.pc`.  Don't copy over the `-L` part, just the paths.  Ignore any `-l` flags [please tell me if you find a case where this breaks].
+
+That's it - Xcode should now resolve `CRuby` against your chosen version.
+
+## Supported Ruby Configs
+
+### macOS system
 
 Use the `xcode-select`ed Xcode:
 ```shell
