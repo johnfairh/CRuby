@@ -1,22 +1,32 @@
+<!--
+CRuby
+README.md
+Distributed under the MIT license, see LICENSE.
+-->
+
 # CRuby
 
 Wrap `libruby` for SwiftPM or Xcode.  Easily reconfigure for your Ruby
 installation.
+
+See [RubyBridge](https://github.com/johnfairh/RubyBridge) for a high-level
+Swift-Ruby integration framework.
 
 Tested with:
 * macOS 10.13 system Ruby
 * macOS Homebrew, RBEnv, RVM
 * macOS bespoke installation
 * Ubuntu 14.04 x86_64 Brightbox ruby2.4-dev
-* Ubuntu 14.04 x86_64 RBEnv, RVM
+* Ubuntu 16.04 x86_64 Brightbox ruby2.5-dev
+* Ubuntu 14.04, 16.04 x86_64 RBEnv, RVM
 
 ## Usage
 
-`CRuby` comes set up to use the macOS system Ruby and the Xcode found at
-`/Applications/Xcode.app` to provide C headers.
+`CRuby` comes set up to use the macOS system Ruby, and Xcode to provide C
+headers.
 
-If you want to use a different Ruby, or if your Xcode is in a different spot,
-then you have to use the `cfg-cruby` script to rewrite the build files.
+If you want to use a different Ruby then use the `cfg-cruby` script to
+rewrite the build config files.
 
 For options other than macOS system Ruby, `cfg-cruby` generates a custom
 pkg-config file called `CRuby.pc` that can be passed directly to `swift build`
@@ -52,10 +62,15 @@ Check Xcode is happy with an `import CRuby` line.
 
 If you want to use a different Ruby, run `cfg-cruby`.  Now transfer the settings
 from the `CRuby.pc` to the Xcode build settings for the target:
-1. Find *Header Search Paths* under *Search Paths* and add the directories mentioned in the `Cflags:` line of `CRuby.pc`.  Don't copy over the `-I` part, just the paths.
-2. Find *Library Search Paths* under *Search Paths* and add the directories mentioned in the `Libs:` line of `CRuby.pc`.  Don't copy over the `-L` part, just the paths.  Ignore any `-l` flags [please tell me if you find a case where this breaks].
+1. Find *Header Search Paths* under *Search Paths* and add the directories
+   mentioned in the `Cflags:` line of `CRuby.pc`.  Don't copy over the `-I` part,
+   just the paths.
+2. Find *Library Search Paths* under *Search Paths* and add the directories
+   mentioned in the `Libs:` line of `CRuby.pc`.  Don't copy over the `-L` part,
+   just the paths.  Ignore any `-l` flags [please tell me if you find a case
+   where this breaks].
 
-That's it - Xcode should now resolve `CRuby` against your chosen version.
+That's it: Xcode should now resolve `CRuby` against your chosen version.
 
 ## Supported Ruby Configs
 
@@ -103,7 +118,7 @@ contains subdirectories including `lib`, `include`, and `bin`.
 
 ## Contributions
 
-Welcome - github / johnfairh@gmail.com.
+Welcome - github / johnfairh@gmail.com
 
 ## License
 
