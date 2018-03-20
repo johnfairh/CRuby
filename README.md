@@ -9,7 +9,7 @@ Distributed under the MIT license, see LICENSE.
 Wrap `libruby` for SwiftPM or Xcode.  Easily reconfigure for your Ruby
 installation.
 
-See [RubyBridge](https://github.com/johnfairh/RubyBridge) for a high-level
+See [RubyGateway](https://github.com/johnfairh/RubyGateway) for a high-level
 Swift-Ruby integration framework.
 
 Tested with:
