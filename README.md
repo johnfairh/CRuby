@@ -4,6 +4,9 @@ README.md
 Distributed under the MIT license, see LICENSE.
 -->
 
+![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20linux-lightgrey.svg)
+![License](https://cocoapod-badges.herokuapp.com/l/RubyGateway/badge.png)
+
 # CRuby
 
 Wrap `libruby` for SwiftPM or Xcode.  Easily reconfigure for your Ruby
