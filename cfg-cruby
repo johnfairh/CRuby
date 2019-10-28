@@ -563,7 +563,7 @@ sub do_custom2 {
     
     # Flags from the pc file
     my $pkglibs = run_and_check("grep ^LIBS= $pc|sed -e s/^.*=//", 1);
-    unless ($pkglibs) {
+    unless (defined $pkglibs) {
         print("Error: Can't find 'LIBS' in the .pc file.\n");
         return 0;
     }
