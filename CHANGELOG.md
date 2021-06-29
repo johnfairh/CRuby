@@ -1,16 +1,18 @@
-## Master
+## 2.0.0
 
 ##### Breaking
 
-* None.
-
-##### Enhancements
-
-* None.
+* Require Swift 5.4.
 
 ##### Bug Fixes
 
-* None.
+* Fix `--mode xcode` option on macOS 11.
+
+## 1.0.1
+
+#### Bug Fixes
+
+* Tolerate empty `LIBS` line from late 2.X series Ruby.
 
 ## 1.0.0
 
