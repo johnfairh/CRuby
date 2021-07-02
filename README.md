@@ -15,13 +15,14 @@ installation.
 See [RubyGateway](https://github.com/johnfairh/RubyGateway) for a high-level
 Swift-Ruby integration framework.
 
-Tested with:
-* macOS 10.13 system Ruby
+Tested with environments:
+* macOS 11 system Ruby
 * macOS Homebrew, RBEnv, RVM
 * macOS bespoke installation
-* Ubuntu 14.04 x86_64 Brightbox ruby2.4-dev
-* Ubuntu 16.04 x86_64 Brightbox ruby2.5-dev
-* Ubuntu 14.04, 16.04 x86_64 RBEnv, RVM
+* Ubuntu 20.04 x86_64 RBEnv, RVM, bespoke
+
+And Ruby versions:
+* 2.6, 2.7, 3.0
 
 ## Usage
 
@@ -35,23 +36,34 @@ For options other than macOS system Ruby, `cfg-cruby` generates a custom
 pkg-config file called `CRuby.pc` that can be passed directly to `swift build`
 or manually copied into your Xcode project settings.
 
+Ruby 3's C interface header files use a non-default feature of Clang, the
+C compiler that the Swift tools use.  Because of interesting Swift design
+choices, you must pass the `-fdeclspec` Clang flag when building a target
+that depends on CRuby.
+
 ### Swift Package Manager
 
 Include this repo as a dependency in your project:
 ```swift
-.package(url: "https://github.com/johnfairh/CRuby/", majorVersion: 1)
+.package(url: "https://github.com/johnfairh/CRuby/", majorVersion: 2)
 ```
 
 To use a Ruby other than macOS system default you need to reconfigure.  For
 example to set up Ruby 2.4.1 managed by `rbenv`:
 ```shell
 swift package edit CRuby
-./Packages/CRuby/cfg-cruby --mode rbenv --name 2.4.1
+./Packages/CRuby/cfg-cruby --mode rbenv --name 2.7.3
 export PKG_CONFIG_PATH=$(pwd)/Packages/CRuby/CRuby.pc:$PKG_CONFIG_PATH
 swift build
 ```
 Either leave the `CRuby` package in edit mode or fork the repo, use that fork
 as your remote, and push your customizations back there.
+
+If you are using Ruby 3 then you must pass an extra flag through to the C
+compiler:
+```
+swift build -Xcc -fdeclspec
+```
 
 ### Xcode
 
@@ -72,6 +84,8 @@ from the `CRuby.pc` to the Xcode build settings for the target:
    mentioned in the `Libs:` line of `CRuby.pc`.  Don't copy over the `-L` part,
    just the paths.  Ignore any `-l` flags [please tell me if you find a case
    where this breaks].
+3. If you are using Ruby 3, find *Other Swift Flags* under *Swift Compiler - Custom Flags*
+   and add two flags: `-Xcc` `-fdeclspec`.
 
 That's it: Xcode should now resolve `CRuby` against your chosen version.
 
