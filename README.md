@@ -22,7 +22,7 @@ Tested with environments:
 * Ubuntu 20.04 x86_64 RBEnv, RVM, bespoke
 
 And Ruby versions:
-* 2.6, 2.7, 3.0
+* 2.6, 2.7, 3.0, 3.1, 3.2
 
 ## Usage
 
@@ -53,7 +53,7 @@ example to set up Ruby 2.4.1 managed by `rbenv`:
 ```shell
 swift package edit CRuby
 ./Packages/CRuby/cfg-cruby --mode rbenv --name 2.7.3
-export PKG_CONFIG_PATH=$(pwd)/Packages/CRuby/CRuby.pc:$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH=$(pwd)/Packages/CRuby:$PKG_CONFIG_PATH
 swift build
 ```
 Either leave the `CRuby` package in edit mode or fork the repo, use that fork
