@@ -1,3 +1,7 @@
+## 2.1.0
+
+* Add .xcconfig generation
+
 ## 2.0.0
 
 ##### Breaking
