@@ -480,9 +480,7 @@ sub do_pkgconfig {
 
     # Good old Homebrew seems to not get this quite right :(
     if (is_macos()) {
-        if (my $brew_prefix = run_and_check("brew --prefix", 0)) {
-            $ldflags .= " -L$brew_prefix/lib";
-        }
+        $ldflags .= " -L$libdir"
     }
 
     write_modulemap($ruby_soname);
